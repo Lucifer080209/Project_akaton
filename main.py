@@ -8,7 +8,7 @@ import json
 from config import Config
 
 
-# ── צבעי Theme (העיצוב המקורי שלך) ──────────────────────────
+# --- הגדרות צבעים (מבוסס על הקוד המקורי שלך) ---
 def hex_color(rgb_tuple):
     """המרה מצבעי Kivy (0-1) לצבעי Hex"""
     r, g, b = rgb_tuple[:3]
@@ -31,11 +31,8 @@ TEXT_MUTED = hex_color((0.420, 0.447, 0.502, 1))  # #6b7280
 
 class CyberGuardApp:
     def __init__(self):
-        # איפוס קובץ נתונים להתחלה נקייה
         self.results_file = 'detection_results.json'
-        if not os.path.exists(self.results_file):
-            with open(self.results_file, 'w', encoding='utf-8') as f:
-                json.dump({"stats": {"safe": 0, "alerts": 0, "emails_sent": 0}}, f)
+        self._ensure_results_file()
 
         self.root = tk.Tk()
         self.root.title("CyberGuard - Smart Child Protection")
@@ -50,8 +47,14 @@ class CyberGuardApp:
 
         self._build_ui()
 
-        # עדכון תצוגה כל 500ms
-        self.root.after(500, self._update_display)
+        # הפעלת לופ עדכון התצוגה
+        self._update_display()
+
+    def _ensure_results_file(self):
+        """יוצר קובץ נתונים התחלתי אם לא קיים"""
+        if not os.path.exists(self.results_file):
+            with open(self.results_file, 'w', encoding='utf-8') as f:
+                json.dump({"stats": {"safe": 0, "alerts": 0, "emails_sent": 0}, "latest": {}}, f)
 
     def _build_ui(self):
         # ── Header ──────────────────────────────────────────────
@@ -96,8 +99,10 @@ class CyberGuardApp:
         for i in range(4): stats_grid.columnconfigure(i, weight=1)
 
         self.stat_widgets = {}
-        s_data = [("safe", "✓ Safe Messages", GREEN, 0), ("alerts", "⚠ Alerts Triggered", YELLOW, 0),
-                  ("emails", "📧 Emails Sent", BLUE, 0), ("accuracy", "🎯 Accuracy", GREEN, "-")]
+        s_data = [("safe", "✓ Safe Messages", GREEN, 0),
+                  ("alerts", "⚠ Alerts Triggered", YELLOW, 0),
+                  ("emails", "📧 Emails Sent", BLUE, 0),
+                  ("accuracy", "🎯 Accuracy", GREEN, "-")]
 
         for idx, (key, label, color, default) in enumerate(s_data):
             f = tk.Frame(stats_grid, bg=BG_CARD)
@@ -113,11 +118,10 @@ class CyberGuardApp:
 
         tk.Label(alerts_frame, text="🔔 Recent Alerts", font=("Arial", 14, "bold"), fg=TEXT_PRI, bg=BG_CARD).pack(
             anchor=tk.W, padx=15, pady=(12, 8))
-        self.alerts_text = scrolledtext.ScrolledText(alerts_frame, font=("Courier", 10), fg=TEXT_PRI, bg=BG_INPUT,
+        self.alerts_text = scrolledtext.ScrolledText(alerts_frame, font=("Arial", 10), fg=TEXT_PRI, bg=BG_INPUT,
                                                      relief=tk.FLAT, height=12)
         self.alerts_text.pack(fill=tk.BOTH, expand=True, padx=15, pady=(0, 12))
         self.alerts_text.tag_config("high_risk", foreground=RED)
-        self.alerts_text.tag_config("timestamp", foreground=TEXT_MUTED)
 
         # ── Settings ──────────────────────────────────────────────
         settings_frame = tk.Frame(content_frame, bg=BG_CARD, bd=1, highlightbackground=BORDER, highlightthickness=1)
@@ -129,16 +133,12 @@ class CyberGuardApp:
             anchor=tk.W, padx=15, pady=(10, 5))
 
         self.email_entry = tk.Entry(settings_frame, font=("Arial", 11), fg=TEXT_PRI, bg=BG_INPUT, insertbackground=BLUE,
-                                    relief=tk.FLAT, bd=5)
+                                    relief=tk.FLAT)
         self.email_entry.insert(0, self.config.get_parent_email() or "")
-        self.email_entry.pack(fill=tk.X, padx=15, pady=(0, 10))
+        self.email_entry.pack(fill=tk.X, padx=15, pady=(0, 10), ipady=8)
 
         tk.Button(settings_frame, text="SAVE SETTINGS", font=("Arial", 11, "bold"), fg=TEXT_PRI, bg=BLUE,
-                  relief=tk.FLAT, command=self._save_email).pack(fill=tk.X, padx=15, pady=(0, 10))
-
-        tk.Button(settings_frame, text="RESTART SYSTEM ENGINE", font=("Arial", 10, "bold"), fg=TEXT_PRI, bg=YELLOW,
-                  relief=tk.FLAT, command=lambda: self._log("🔄 System engine restarting...")).pack(fill=tk.X, padx=15,
-                                                                                                   pady=(0, 10))
+                  relief=tk.FLAT, command=self._save_email, cursor="hand2").pack(fill=tk.X, padx=15, pady=(0, 10))
 
         self.save_feedback = tk.Label(settings_frame, text="", font=("Arial", 10), fg=GREEN, bg=BG_CARD)
         self.save_feedback.pack(anchor=tk.W, padx=15)
@@ -174,36 +174,56 @@ class CyberGuardApp:
         self.console_text.config(state=tk.DISABLED)
 
     def _update_display(self):
+        """פונקציה שרצה כל שנייה ומעדכנת את המסך מהקובץ JSON"""
         self.time_label.config(text=datetime.now().strftime("%H:%M:%S"))
+
         try:
             if os.path.exists(self.results_file):
                 with open(self.results_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
 
+                # עדכון סטטיסטיקה
                 if 'stats' in data:
-                    s, a = data['stats'].get('safe', 0), data['stats'].get('alerts', 0)
+                    s = data['stats'].get('safe', 0)
+                    a = data['stats'].get('alerts', 0)
+                    e = data['stats'].get('emails_sent', 0)
+
                     self.stat_widgets['safe'].config(text=str(s))
                     self.stat_widgets['alerts'].config(text=str(a))
-                    self.stat_widgets['emails'].config(text=str(data['stats'].get('emails_sent', 0)))
-                    total = s + a
-                    self.stat_widgets['accuracy'].config(text=f"{int((s / total) * 100)}%" if total > 0 else "-")
+                    self.stat_widgets['emails'].config(text=str(e))
 
-                if 'latest' in data:
+                    total = s + a
+                    if total > 0:
+                        acc = f"{int((s / total) * 100)}%"
+                    else:
+                        acc = "-"
+                    self.stat_widgets['accuracy'].config(text=acc)
+
+                # עדכון הודעה אחרונה ביומן ההתראות
+                if 'latest' in data and data['latest']:
                     lt = data['latest']
-                    if lt.get('timestamp') != self.last_msg_time:
-                        self.last_msg_time = lt.get('timestamp')
-                        self._log(f"📨 NEW MESSAGE: {lt['text']}")
-                        if lt.get('risk_level', 0) >= 60:
+                    current_ts = lt.get('timestamp')
+
+                    if current_ts != self.last_msg_time:
+                        self.last_msg_time = current_ts
+                        msg_text = lt.get('text', '')
+                        risk = lt.get('risk_level', 0)
+
+                        self._log(f"📨 New Processed Message: {msg_text[:30]}...")
+
+                        if risk >= 60:
                             self.alerts_text.config(state=tk.NORMAL)
-                            self.alerts_text.insert(tk.END, f"🚨 ALERT ({lt['risk_level']}%): {lt['text']}\n",
+                            self.alerts_text.insert(tk.END,
+                                                    f"[{datetime.now().strftime('%H:%M')}] 🚨 ALERT ({risk}%): {msg_text}\n",
                                                     "high_risk")
                             self.alerts_text.see(tk.END)
                             self.alerts_text.config(state=tk.DISABLED)
-        except:
+        except Exception as e:
             pass
+
+        # קריאה חוזרת לפונקציה בעוד 1000 מילישניות (שנייה אחת)
         self.root.after(1000, self._update_display)
 
-    # --- הפונקציה שהייתה חסרה ---
     def run(self):
         self.root.mainloop()
 
